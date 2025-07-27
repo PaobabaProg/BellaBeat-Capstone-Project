@@ -1,0 +1,147 @@
+---
+title: "Bellabeat Case Study with R"
+author: "Witchakon"
+date: "2025-07-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Bellabeat Case Study
+
+For the Coursera Data Analyst course, I was tasked to find insight in how people uses fitness tracker device data on Kaggle.
+<a href = "https://www.kaggle.com/datasets/arashnic/fitbit" target = "_blank">Data set</a>
+
+The dataset was collected via a survey, with 30 eligible consented users. This I understand that 30 sample size is a limited size and won't show the full picture of how user uses the Fit bit Tracker. However the Data collected are rich with many variable to explore
+
+## Setting up the R envioment
+
+```{r Packages, message=FALSE}
+install.packages("tidyverse")
+install.packages("ggplot2")
+install.packages("dplyr")
+install.packages("tidyr")
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+### Importing the data set
+The data set was initially cleaned a little in Google Sheets. I've removed data that shows 0 or empty cells in all variable, which mean the tracker wasn't used that day in order. I import the cleaned version using read.csv.
+
+```{r Import}
+daily_activities <- read.csv("Bellabeat Data - dailyActivity_Cleaned.csv")
+sleep_info <- read.csv("sleepDay_merged.csv")
+Intensities <- read.csv("dailyIntensities_merged.csv")
+weight <- read.csv("weightLogInfo_merged.csv")
+```
+
+### More Cleaning 
+After importing the data, and viewing it I realised that some of the date format are different. For example: The date was in a mm-dd-yyyy and the other was in a dd-mm-yyyy with time stamp
+
+```{r Date Cleaning}
+sleep_info$SleepDay <- as.Date(sleep_info$SleepDay, format = "%m/%d/%Y %I:%M:%S %p")
+sleep_info$SleepDay <- format(sleep_info$SleepDay, "%m/%d/%Y")
+weight$Date <- as.POSIXct(weight$Date, format = "%m/%d/%Y %I:%M:%S %p")
+weight$Date <- format(weight$Date, "%m/%d/%Y")
+```
+This changes all of the date time stamp into M/DD/YYYY, Which will make our graph nicer to look at when plot against date
+
+## Analysis
+Upon initial inspection using the summary function:
+```{r Daily Activities Summary}
+daily_activities %>%
+  select(TotalSteps, TotalDistance, VeryActiveMinutes, SedentaryMinutes) %>%
+  summary()
+```
+We can see that the Average total steps are below the 10000 steps recommendation widely regconised for lowering various disease and healthy lifestyle for adults
+
+However with a deeper correlation test shown in the graph below:
+### Total steps against time spent still
+```{r TotalSteps Againts Sedentary Minutes}
+ggplot(data=daily_activities, aes(x=TotalSteps, y = SedentaryMinutes)) %>%
+  + geom_point() %>%
+  + geom_smooth(method = "lm", se = FALSE)
+
+cor.test(daily_activities$TotalSteps, daily_activities$SedentaryMinutes)
+```
+Using correlation test, showing us a small p-value suggesting a **significant result but a weak relationship**. Nevertheless we can see that many user have tracked step of below 10000, thus a nudge notification to user when they don't complete their Daily 10K steps is recommended.
+### Reformatting
+```{r More cleaning, echo=FALSE}
+sleep_info <- sleep_info %>%
+  rename(ActivityDate = SleepDay)
+str(daily_activities$ActivityDate) #chr Array
+str(sleep_info$ActivityDate) #chr Array
+sleep_info$ActivityDate <- as.Date(sleep_info$ActivityDate, format = "%m/%d/%Y")
+daily_activities$ActivityDate <- as.Date(daily_activities$ActivityDate, format = "%m/%d/%Y")
+```
+Merging the data between activities and sleep table on date and ID, in order to look at the relationship between Activities Pattern and Sleep activities. the code above is to check the format of the date and I found that it is a character array, thus using **as.Date()** reformat them into a Date.
+### Merging Table
+```{r Merging the data}
+merged_data <- inner_join(daily_activities, sleep_info, by = c("Id", "ActivityDate"))
+length(unique(merged_data$Id)) # there's a total of 24 unique participant
+```
+Merging the data using inner join, merging them on the ID and the Activity date so each data point match for each day. The second line shows the amount of unique participant in the merged table. with this we can see that there's a total of 24 people who participated. Understand that once again it is a limited data size but it had a total of 413 entries, therefore it is sufficient to show any possible relationship.
+### Merged table Analysis
+```{r ActiveMinutes Vs. Sleep Minutes}
+merged_data %>%
+  filter(VeryActiveMinutes > 0) %>%
+  ggplot(aes(x=VeryActiveMinutes, y = TotalMinutesAsleep)) + geom_point() + geom_smooth(method = "lm", se=TRUE)+labs( title = "Total Minutes Asleep against Active Minutes", x = "Sedentary Minutes", y = "Total Minutes Asleep")
+cor.test(merged_data$VeryActiveMinutes, merged_data$TotalMinutesAsleep)
+```
+Simply Looking at the graph, We can see that there is no relationship between Very Actives Minutes (Exercising) to the amount of sleep a person gets. The p-value and the correlation of -0.09 suggest no significant relationship here. How about when compared to Sedentary Minutes (Staying still or no activities)?
+```{r SedentaryMinutes Vs. Sleep Minutes}
+ggplot(data=merged_data, aes(x=SedentaryMinutes, y = TotalMinutesAsleep))+ geom_point() + geom_smooth(method = "loess", se=TRUE)+ labs( title = "Total Minutes Asleep against Sedentary Minutes", x = "Sedentary Minutes", y = "Total Minutes Asleep")
+cor.test(merged_data$TotalMinutesAsleep, merged_data$SedentaryMinutes)
+```
+The scatter plots shows some relationship here, since i have quite a small data set of <1000. Using a "loess" method made it possible for me to show the relationship using curve smoothing. As the data suggest the more time spent sedentary, the less sleeps the user got. **The** *p-value* **and** *correlation coefficient* **suggest a moderate, statistically significant negative correlation**. Furthermore this could suggest that the user is also getting a lower quality sleep. We can look into this further by exploring user with more than 800 Sedentary minutes.
+```{r Deeper look into Sedentary Minutes}
+longSedentaryMinutes <- merged_data %>% 
+  filter(SedentaryMinutes > 800)
+
+longSedentaryMinutes %>%
+  summarise(mean_sleep = mean(TotalMinutesAsleep, na.rm = FALSE))
+
+merged_data %>% 
+  summarise(mean_sleep = mean(TotalMinutesAsleep, na.rm = FALSE))
+```
+A deeper look shows that the average for people who had Sedentary Minutes above 800 minutes on average have less sleep than people with below 800 minutes by 105 minutes. This therefore suggest that a high sedentary minutes leads to a lower quality of sleep or less sleep in general. Which could affect health as the recommended time for sleep is around 7-9 hours of sleep for adults <a href = "https://www.nhlbi.nih.gov/health/sleep/how-much-sleep" target = "_blank">Reference</a>.
+
+## Summary of Findings
+
+Using publicly available Fitbit data from 33 participants, we explored relationships between physical activity, sedentary behavior, and sleep duration. The objective was to discover patterns that could inform Bellabeat’s product development and user engagement strategies.
+
+### Key Insights:
+
+- **High Sedentary Time and Low Step count:**  
+  Many users recorded more than **800 minutes (13+ hours)** of sedentary time daily, suggesting low overall movement. Supported by low step counts, below 10000
+
+- **Sedentary Minutes vs. Sleep Duration:**  
+  We found a **moderate negative correlation but significant** (**r = -0.60**, p < 0.001) between `SedentaryMinutes` and `TotalMinutesAsleep`. which suggest that the higher the Sedentary minutes the less the user sleeps, possible effect on quality of sleep leading to effect on health.
+
+- **Limited Sleep Logging:**  
+  Only **24 out of 33 users** consistently logged sleep data, **limiting in-depth sleep** analysis and indicating a need for improved user participation in tracking. This will help the team to create a more robust finding on the relationship
+
+### Recommendation to Stakeholders
+
+1. Introduce Inactivity Alerts
+Implement **in-app reminders** or **vibration notifications** to encourage users to move after long periods of inactivity. Gamify standing goals to increase engagement.
+
+2.Improve Sleep Tracking Features
+- Offer **sleep feedback**, **bedtime reminders**, and highlight the **health value of sleep**. Utilise BellaBeat's leaf app and promote it through social media.
+- Educate users on sleep trends through **visual dashboards**, using scientific recommendation number to show measurable targets for user.
+
+3.Utilising Membership features
+- With the data collected when filtered out. We can see that some user are not keeping up with health recommendation backed by science. Thus, we can **target these group of people** to sign up membership. In order to promote a healthier lifestyle to them
+
+### Conclusion
+
+That conclude my first project on my data analysis journey. their are some areas that I could help dive in further, and more question I could have asked. There are more data to explore and more languages to learn, such as Python, for me to be competitive in job market. So for now, this is it. Thank you from the bottom of my heart if you looked at this
+
+### Source
+This dataset is based on the [Fitbit Fitness Tracker Data](https://www.kaggle.com/arashnic/fitbit) made publicly available for educational purposes. inspired by [Another Project](https://www.kaggle.com/code/chebotinaa/bellabeat-case-study-with-r)
+
+Cleaned and processed by Witchakon Watsana as part of the Google Data Analytics Capstone project.
